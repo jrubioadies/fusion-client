@@ -8,15 +8,19 @@ estado con `getESSJobStatus`, sobre el endpoint:
 
     {base}/fscmService/ErpIntegrationService
 
-Frontera de diseño: `fbip.py` sólo lee; `ess.py` sólo actúa. Toda la lógica
-de negocio (qué job, en qué orden) vive en `closer.py`, no aquí.
+Frontera de diseño: `bip` sólo lee; `ess` sólo actúa. Toda la lógica de
+negocio (qué job, en qué orden) vive en el consumidor, no aquí.
+
+Los errores salen como subclases de FusionError (que hereda de RuntimeError):
+FusionAuthError para el 401 y FusionESSError para el resto. Nunca sys.exit.
 
 El transporte HTTP es INYECTABLE (`transport=`) para poder testear sin red:
 una función `transport(url, body, user, pw, timeout) -> (status_code, text)`.
 """
 import re
-import base64
 import requests
+
+from .errors import FusionAuthError, FusionESSError
 
 NS_TYP = "http://xmlns.oracle.com/apps/financials/commonModules/shared/model/erpIntegrationService/types/"
 NS_ERP = "http://xmlns.oracle.com/apps/financials/commonModules/shared/model/erpIntegrationService/"
@@ -77,9 +81,9 @@ def _fault_text(text):
 
 def _check(status, text):
     if status == 401:
-        raise RuntimeError("401 No autorizado — usuario o contraseña incorrectos.")
+        raise FusionAuthError("401 No autorizado — usuario o contraseña incorrectos.")
     if status >= 400:
-        raise RuntimeError(f"Error ERP Integration (HTTP {status}):\n{_fault_text(text)}")
+        raise FusionESSError(f"Error ERP Integration (HTTP {status}):\n{_fault_text(text)}")
 
 
 def _esc(s):
@@ -108,10 +112,10 @@ def submit_ess_job(base, user, pw, job_package, job_definition, params=None,
     _check(status, text)
     m = re.search(r"<(?:\w+:)?result(?:\s[^>]*)?>(.*?)</(?:\w+:)?result>", text, re.S)
     if not m:
-        raise RuntimeError("submitESSJobRequest no devolvió requestId:\n" + text[:600])
+        raise FusionESSError("submitESSJobRequest no devolvió requestId:\n" + text[:600])
     rid = m.group(1).strip()
     if not re.fullmatch(r"-?\d+", rid):
-        raise RuntimeError(f"requestId inesperado: {rid!r}\n{text[:400]}")
+        raise FusionESSError(f"requestId inesperado: {rid!r}\n{text[:400]}")
     return rid
 
 
@@ -128,7 +132,7 @@ def get_job_status(base, user, pw, request_id, timeout=60, transport=None):
     _check(status, text)
     m = re.search(r"<(?:\w+:)?result(?:\s[^>]*)?>(.*?)</(?:\w+:)?result>", text, re.S)
     if not m:
-        raise RuntimeError("getESSJobStatus sin result:\n" + text[:600])
+        raise FusionESSError("getESSJobStatus sin result:\n" + text[:600])
     return m.group(1).strip().upper()
 
 

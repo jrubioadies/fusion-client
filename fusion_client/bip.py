@@ -27,7 +27,12 @@ from pathlib import Path
 import requests
 from xml.sax.saxutils import escape
 
-from .errors import FusionAuthError, FusionSQLError, FusionTooLongError
+from .errors import (
+    FusionAuthError,
+    FusionBIPError,
+    FusionSQLError,
+    FusionTooLongError,
+)
 
 NS = "http://xmlns.oracle.com/oxp/service/PublicReportService"
 CFG = Path.home() / ".config" / "fusion-bip" / "config.json"
@@ -82,7 +87,7 @@ def soap_call(base, user, pw, body_inner, timeout=120):
             raise FusionSQLError(f"SQL error:\n{head}\n\n--- full ---\n{msg}")
         if sqlerr:
             raise FusionSQLError(f"SQL error:\n{sqlerr.group(1).strip()[:400]}\n\n--- full ---\n{msg}")
-        raise RuntimeError(f"BI Publisher error (HTTP {r.status_code}):\n{msg}")
+        raise FusionBIPError(f"BI Publisher error (HTTP {r.status_code}):\n{msg}")
     return r.text
 
 
@@ -209,7 +214,7 @@ def run_sql(base, user, pw, report_path, sql, timeout=300):
     xml = soap_call(base, user, pw, body, timeout=timeout)
     m = re.search(r"<(?:\w+:)?reportBytes>(.*?)</(?:\w+:)?reportBytes>", xml, re.S)
     if not m:
-        raise RuntimeError("No reportBytes in response: " + xml[:800])
+        raise FusionBIPError("No reportBytes in response: " + xml[:800])
     return base64.b64decode(m.group(1))
 
 
