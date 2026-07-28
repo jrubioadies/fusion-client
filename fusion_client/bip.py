@@ -27,6 +27,8 @@ from pathlib import Path
 import requests
 from xml.sax.saxutils import escape
 
+from .errors import FusionAuthError, FusionSQLError, FusionTooLongError
+
 NS = "http://xmlns.oracle.com/oxp/service/PublicReportService"
 CFG = Path.home() / ".config" / "fusion-bip" / "config.json"
 
@@ -66,7 +68,7 @@ def soap_call(base, user, pw, body_inner, timeout=120):
         timeout=timeout,
     )
     if r.status_code == 401:
-        sys.exit("401 Unauthorized - bad user/password.")
+        raise FusionAuthError("401 Unauthorized - usuario o contraseña incorrectos.")
     if r.status_code >= 400:
         # surface SOAP fault text (SOAP 1.2 Reason/Text, or 1.1 faultstring)
         fault = (re.search(r"<(?:\w+:)?Text[^>]*>(.*?)</(?:\w+:)?Text>", r.text, re.S)
@@ -77,9 +79,9 @@ def soap_call(base, user, pw, body_inner, timeout=120):
         sqlerr = re.search(r"java\.sql\.\w+:\s*(.*)", msg, re.S)
         if ora:
             head = "\n".join(dict.fromkeys(ora))  # dedupe, keep order
-            raise RuntimeError(f"SQL error:\n{head}\n\n--- full ---\n{msg}")
+            raise FusionSQLError(f"SQL error:\n{head}\n\n--- full ---\n{msg}")
         if sqlerr:
-            raise RuntimeError(f"SQL error:\n{sqlerr.group(1).strip()[:400]}\n\n--- full ---\n{msg}")
+            raise FusionSQLError(f"SQL error:\n{sqlerr.group(1).strip()[:400]}\n\n--- full ---\n{msg}")
         raise RuntimeError(f"BI Publisher error (HTTP {r.status_code}):\n{msg}")
     return r.text
 
@@ -184,7 +186,9 @@ def _sql_params_xml(sql):
     MAX = 24000  # per-chunk raw bytes (base64 stays < RAW(32767))
     chunks = [raw[i:i + MAX] for i in range(0, len(raw), MAX)] or [b""]
     if len(chunks) > 8:
-        sys.exit("SQL too long (>192KB). Split it or reduce.")
+        raise FusionTooLongError(
+            "El SQL supera los 192 KB que admite el data model. Divídelo o redúcelo."
+        )
     pnv = ""
     for idx in range(8):
         val = base64.b64encode(chunks[idx]).decode() if idx < len(chunks) else ""
